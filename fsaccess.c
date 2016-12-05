@@ -33,7 +33,7 @@ struct inode{
     unsigned short addr[8];
     unsigned short actime[2];
     unsigned short modtime[2];
-};//v
+};
 
 struct superBlock{
     unsigned short isize;
@@ -46,238 +46,31 @@ struct superBlock{
     char ilock;
     char fmod;
     unsigned short time[2];
-};//v
+};
+
+enum inodeFlag{
+    ALLOC, //allocated
+    PLAIN, //regular file
+    DIR, //directory
+    LARGE //large file
+};
 
 superBlock super;
 inode Inode;
-
 int fd;
 unsigned short dataBlockNum, inodeBlockNum, freelistBlockNum, inodeCurrent, totalBlockNum, inodeNum;
 
-unsigned short  countFreeBlockNum()//v
-{
-	superBlock bufBlock;
-	lseek(fd, blockSize, SEEK_SET);
+void fillInodeList ();
+unsigned short allocInode ();
+void initFreelist ();
+int fillFreelist ();
+unsigned short allocBlock ();
+unsigned int sizing (char size0, unsigned short size1, unsigned short flags);
+void setFlag (unsigned short &flags, inodeFlag iflag);
+int checkFlag (unsigned short &flags, inodeFlag iflag);
+int find_dirInode(char *directory, int dirInodeNo);
 
-	read(fd, &bufBlock, sizeof(super));
-    
-    int freeBlockNum = 0;
-	freeBlockNum = bufBlock.nfree;
-
-	if(super.free[0] != 0)
-		lseek(fd, blockSize * super.free[0], SEEK_SET);
-	else
-		return freeBlockNum;
-    
-    unsigned short nfree = 0, firstBlockNo = 1;
-	while(firstBlockNo != 0)
-	{
-		read(fd, &nfree, sizeof(nfree));
-		freeBlockNum += nfree;
-
-		read(fd, &firstBlockNo, sizeof(nfree));
-		lseek(fd, firstBlockNo * blockSize, SEEK_SET);
-	}
-
-	return num_of_free_blocks;
-}
-
-void fillInodeList () {
-    lseek(fd, 2 * blockSize, SEEK_SET);
-    int counter = 0;
-    for(int i = 0; i < (blockSize / sizeof(inode)) * super.isize; i++) // retrieve 100 free inode by traveling through each inode
-    {
-        if(counter >= 100)
-        {
-            break;
-        }
-        read(fd, &local, sizeof(local));
-        if(!checkFlag(local.flags, ALLOC))
-        {
-            super.inodeList[counter] = i + 1; // since root inode starts at 1
-            counter++; 
-        }
-    }
-    super.ninode = counter;
-} //v
-
-unsigned short allocInode () {
-    
-    if (super.ninode > 0) {
-        super.ninode--;
-        return super.inodeList[super.nfree];
-    }
-    
-    // List is empty, so...
-    fillInodeList();
-    if (super.ninode > 0)
-    {
-        return allocInode();
-    }
-    
-    // No inodes left!
-    return -1;
-} //v
-
-void initFreelist()//v
-{
-	unsigned short nfree = 100;
-	unsigned short freeDataBlockNo, freelistBlockNo;
-    unsigned short emptySignal = 0;
-	int dataBlockNum = totalBlockNum - inodeBlockNum - 2;
-
-	freelistBlockNum = (dataBlockNum - 1) / 100 ;
-
-
-	lseek(fd, (2 + inodeBlockNum + 1) * blockSize, SEEK_SET);
-
-	freelistBlockNo = 2 + inodeBlockNum + 1;
-
-	freeDataBlockNo = freelistBlockNo + freelistBlockNum;
-
-    // initialize freelist
-	super.free[0] = freelistBlockNo;
-	for(int i = 1; i < 100; i++)
-	{
-		super.free[i] = freeDataBlockNo++;
-	}
-
-	// free data block list
-	for(int i = 0; i < freelistBlockNum; i++)
-	{
-        int remainingBlockNum = (dataBlockNum - 1 - 100);// dataBlockNum - root block - blocks already in super.free
-		
-        if(remainingBlockNum / 100)
-			nfree = 100 - 1;
-		else
-			nfree = remainingBlockNum % 100;
-        
-		write(fd, &nfree, 2);
-        
-		if(i == freelistBlockNum - 1)
-		{
-			write(fd, &emptySignal, 2);
-		}
-		else
-		{
-			freelistBlockNo++;
-			write(fd, &freelistBlockNo, 2);
-			remainingBlockNum--;
-		}
-
-		for(int j = 0; j < nfree - 1; j++)
-		{
-			write(fd, &freeDataBlockNo, 2);
-			freeDataBlockNo++;
-			remainingBlockNum--;
-		}
-
-		lseek(fd, freelistBlockNo*blockSize, SEEK_SET);
-	}
-}
-
-int fillFreelist()//v
-{
-    if(super.free[0] == 0)
-    {
-        printf("No more available data blocks \n");
-        return 0;
-    }
-    else
-    {
-        unsigned short nfree;
-        unsigned short freelistBlockNo = super.free[0];
-        lseek(fd, freelistBlockNo * blockSize, SEEK_SET);
-        read(fd, &nfree, 2);
-        
-        unsigned short buf;
-        for(int i = 0; i < nfree; i++)
-        {
-            read(fd, &buf, 2);
-            super.free[i] = buf;
-        }
-        
-        super.free[nfree] = free_list_block_num;
-        super.nfree = nfree + 1;
-        return 1;
-    }
-}
-
-unsigned short allocBlock()//v
-{
-    if(super.nfree == 1)
-    {
-        if(fillFreelist() != 1)
-        {
-            return 0;
-        }
-        else
-        {
-            super.nfree--;
-            return super.free[super.nfree];
-        }
-    }
-    else
-    {
-        super.nfree--;
-        return super.free[super.nfree];
-    }
-}
-
-unsigned int sizing (char size0, unsigned short size1, unsigned short flags) {
-    unsigned int size = 0;
-    unsigned int high = (size0 & 0xFF) << 16;
-    unsigned int low = (size1 & 0xFFFF);
-    unsigned int firstBit = (flags & 0x0200) << 15;
-    size = high + low +firstBit;
-    return size;
-}
-
-void initFS() //v
-{
-    //initialize global variable
-    dataBlockNum, inodeBlockNum, freelistBlockNum, inodeCurrent
-
-    // initialize super block
-    if(inodeNum % 16)
-        super.isize = (inodeNum / 16) + 1;
-    else
-        super.isize = (inodeNum / 16);
-    super.fsize = totalBlockNum;
-    initFreelist();
-    fillInodeList();
-    
-    lseek(fd, 1* blockSize, SEEK_SET);
-    write(fd, &super, sizeof(super));
-    
-    // Set length of file
-    ftruncate(fd, super.fsize * blockSize);
-    
-    // writing zeroes to all inodes in ilist
-    char buffer[blockSize];
-    for (int i=0; i<blockSize; i++)
-        buffer[i] = 0;
-    lseek(fd, 2 * blockSize, SEEK_SET);
-    for (i=0; i < super.isize; i++)
-        write(fd,buffer,blockSize);
-    
-    //Initialize the root data block in DIR format
-    unsigned short inodeBlockNo = allocBlock();
-    lseek(fd, ((2 + inodeBlockNo) * blockSize), SEEK_SET);
-    addEntry(".", 0, 0);
-    addEntry("..", 0, 0);
-    
-    //create root directory inode
-    inode rootInode;
-    setFlag(rootInode.flags,ALLOC);
-    setFlag(rootInode.flags, DIR);
-    rootInode.size0 = 0x00;
-    rootInode.size1 = 0x0020;
-    rootInode.addr[0] = inodeBlockNo;
-    lseek(fd, blockSize*2, SEEK_SET);//the No. for rootInode is 0;
-    write(fd, &rootInode, sizeof(inode));
-}
-
+void initFS ();
 void createFile(char *src, char *dst) //v
 {
     //check the length of the file name
@@ -306,19 +99,11 @@ void createFile(char *src, char *dst) //v
         return;
     }
     //check the duplicate file name
-    file_inode_num = find_dirInode(filename, inodeCurrent,0);
+    file_inode_num = find_dirInode(filename, inodeCurrent);
     if(file_inode_num != 0)
     {
         printf("file already exists in the current directory \n");
         return;
-    }
-    
-    //check the input file size with remaining size
-    unsigned long long availableByte = countFreeBlockNum() * 512;
-    if(availableByte < cpinFileSize)
-    {
-        printf("Donnot have enough available data blocks\n");
-        continue;
     }
 
     // srcname is a path+filename or just filename
@@ -496,147 +281,6 @@ void createFile(char *src, char *dst) //v
 	return;
 }
 
-
-int find_dirInode(char *directory, int dirInodeNo, int is_dir)
-{
-	int i = 0, j = 0, k = 0, l = 0;
-	int inode_pos;
-	unsigned short new_dirInodeNo, data_block_num, data_block, data_block_1;
-	char dir_name[14];
-	inode dir_inode;
-	inode_pos = blockSize *2 + dirInodeNo * 32;
-	lseek(fd, inode_pos, SEEK_SET);
-	read(fd, &dir_inode, sizeof(inode));
-	if((!(dir_inode.flags & 0x4000)) && is_dir)
-	{
-		printf("the entered directory %s is not a directory \n",directory);
-                return 0;  //error
-	}
-
-	if(!(dir_inode.flags & 0x1000))    //not a large directory (direct addressing)
-	{
-		for(i = 0; i < 8 ; i++)
-		{
-			if(dir_inode.addr[i] == 0)
-			{
-				return 0;
-			}
-			data_block_num = dir_inode.addr[i];
-			lseek(fd, blockSize * data_block_num, SEEK_SET);
-			if(i == 0)
-			{
-				lseek(fd, 32, SEEK_CUR);      //first 32 bytes are for itself and parent dir
-			}
-			for(j = 0; j < ((blockSize/16) - 2); j++)
-			{
-				read(fd, &new_dirInodeNo, 2);
-				if(new_dirInodeNo != 0)
-				{
-					read(fd, dir_name, 14);
-					if(strcmp(dir_name, directory) == 0)
-					{
-						return new_dirInodeNo; 
-					}
-				}
-				else
-				{
-					return 0;
-				}
-			}
-		}
-	}
-	else
-	{
-		for(i = 0; i < 7 ; i++)
-                {
-                        if(dir_inode.addr[i] == 0)
-                        {
-                                return 0;
-                        }
-                        data_block_num = dir_inode.addr[i];
-			for(k = 0; k < blockSize/2; k++)
-			{
-				lseek(fd, data_block_num * blockSize + (k * 2), SEEK_SET);
-				read(fd, &data_block, 2);
-				if(data_block == 0)
-				{
-					return 0;
-				}
-				lseek(fd, data_block * blockSize, SEEK_SET);
-				j = 0;
-				if(i == 0 && k == 0)
-                        	{
-                                	lseek(fd, 32, SEEK_CUR);      //first 32 bytes are for itself and parent dir
-					j = 2;
-                        	}
-
-				for(; j < ((blockSize/16)); j++)
-                        	{
-                                	read(fd, &new_dirInodeNo, 2);
-                                	if(new_dirInodeNo != 0)
-                                	{
-                                        	read(fd, dir_name, 14);
-                                        	if(strcmp(dir_name, directory) == 0)
-                                        	{
-                                                	return new_dirInodeNo;
-                                        	}
-                                	}
-                                	else
-                                	{
-                                        	return 0;
-                                	}
-                        	}
-			}
-		}
-
-		if(i == 7)
-                {
-                        data_block_1 = dir_inode.addr[i];
-                        if(data_block_1 == 0)
-                        {
-                                return 0;
-                        }
-                        for(l = 0; l < blockSize/2; l++)
-                        {
-                                lseek(fd, data_block_1 * blockSize + l * 2, SEEK_SET);
-                                read(fd, &data_block_num,2);
-                                if(data_block_num == 0)
-                                {
-                                        return 0;
-                                }
-
-                                for(k = 0; k < blockSize/2; k++)
-                                {
-                                        lseek(fd, data_block_num * blockSize + (k * 2), SEEK_SET);
-                                        read(fd, &data_block, 2);
-                                        if(data_block == 0)
-                                        {
-                                                return 0;
-                                        }
-                                        lseek(fd, data_block * blockSize, SEEK_SET);
-                                        for(j = 0; j < ((blockSize/16)); j++)
-                                        {
-                                                read(fd, &new_dirInodeNo, 2);
-                                                if(new_dirInodeNo != 0)
-                                                {
-                                                        read(fd, dir_name, 14);
-							if(strcmp(dir_name, directory) == 0)
-                                                        {
-                                                                return new_dirInodeNo;
-                                                        }
-                                                }
-                                                else
-                                                {
-                                                        return 0;;
-                                                }
-                                        }
-                                }
-                        }
-                }
-	}
-        return 0;	
-}
-
 void copyＦileＥxt(char *srcname,char *targnam) //v
 {
 	int i = 0,j = 0, k = 0;
@@ -649,7 +293,7 @@ void copyＦileＥxt(char *srcname,char *targnam) //v
 	ssize_t readSize, write_size, test_size;
 	char data[512]; 
 	
-    fileInode_num = find_dirInode(srcname, dirInodeNo,0);
+    fileInode_num = find_dirInode(srcname, inodeCurrent);
 	if(fileInode_num == 0)
 	{
 		printf("Could not find the Inode of %s \n",srcname);
@@ -779,58 +423,6 @@ void copyＦileＥxt(char *srcname,char *targnam) //v
 	}
 }
 
-enum inodeFlag{
-    ALLOC, //allocated
-    PLAIN, //regular file
-    DIR, //directory
-    LARGE //large file
-};//v
-
-void setFlag (unsigned short &flags, inodeFlag iflag) {
-    switch(iflag)
-    {
-        case ALLOC:
-            flags = flags | 0x8000;
-            break;
-            
-        case PLAIN:
-            flags = flags | 0x6000;
-            flags = flags & ~(0x0200);
-            break;
-            
-        case DIR:
-            flags = flags | 0x4000; // 4 or 6
-            flags = flags & ~(0x2000);// has to be 4
-            flags = flags & ~(0x0200);
-            break;
-            
-        case LARGE: 
-            flags = flags | 0x1200;
-            break;
-    }
-}//v
-
-int checkFlag (unsigned short &flags, inodeFlag iflag) {
-    switch(iflag)
-    {
-        case ALLOC:
-            return  (flags & 0x8000) == 0x8000;
-            break;
-            
-        case PLAIN:
-            return  (flags & 0x6000) == 0x6000 && ((flags & 0x0200) != 0x0200);
-            break;
-            
-        case DIR:
-            return ((flags & 0x4000) == 0x4000) && ((flags & 0x2000) != 0x2000) && ((flags & 0x0200) != 0x0200);
-            break;
-            
-        case LARGE: 
-            return  (flags & 0x1200) == 0x1200;
-            break;
-    }
-}//v
-
 void mkdirectory(char* filename, unsigned short inum) //v
 {
     inode local = accessInode(inum);
@@ -858,17 +450,17 @@ void addEntry(char *filename, unsigned short dirInodeNo, unsigned short file_ino
     int addr_changed = 0;
     
     inode dir_inode;
-    inode_pos = ;
     
-    lseek(fd, (blockSize * 2) + ((dirInodeNo-1) * sizeof(inode)), SEEK_SET);
+    lseek(fd, (blockSize * 2) + ((dirInodeNo) * sizeof(inode)), SEEK_SET);
     read(fd, &dir_inode, sizeof(inode));
+    
     if(!checkFlag(dir_inode.flags,DIR))
     {
-        printf("Entered name is not a directory \n");
-        return 0;
+        printf("Entered name is not a directory. Command isn't executed.\n");
+        return;
     }
     
-    for(i = 0; (dir_inode.addr[i] != 0) && (i < 7); i++);
+    for(i = 0; (dir_inode.addr[i] != 0) && (i < 7); i++)//go to the last one entry
     
     if((i == 7) && (dir_inode.addr[i] != 0))
     {
@@ -878,6 +470,7 @@ void addEntry(char *filename, unsigned short dirInodeNo, unsigned short file_ino
     {
         data_blocknum = dir_inode.addr[--i];   //consider the previous valid block
     }
+    
     if(i > 0)
     {
         j = 0;
@@ -889,6 +482,7 @@ void addEntry(char *filename, unsigned short dirInodeNo, unsigned short file_ino
         lseek(fd, blockSize * data_blocknum + 32, SEEK_SET);
         /* +32 is for the 16 bytes which is holding the names of self and parent names */
     }
+    
     for( ; j < 32; j++)
     {
         read(fd, &inode_num, 2);
@@ -905,6 +499,7 @@ void addEntry(char *filename, unsigned short dirInodeNo, unsigned short file_ino
             continue;
         }
     }
+    
     if(j != 31)
     {
         write(fd, &zero_block, 2);
@@ -951,16 +546,16 @@ void addEntry(char *filename, unsigned short dirInodeNo, unsigned short file_ino
 
 int main(int argc, char *argv[])
 {
-	int i = 0, j = 0;
-	char buffer[50], path[50];
-	char cmd[10], total_blocks[10];
-	char initfs_cmd[50];
-	char ext_file[1000], int_file[1000], int_direct[1000];
-	char directory[14];
-	unsigned char dir_orfile[14];
-    unsigned short dirInodeNo, file_inode_num, inode_num;
-	char filename[14];
-	int error;
+//	int i = 0, j = 0;
+//	char buffer[50], path[50];
+//	char cmd[10], total_blocks[10];
+//	char initfs_cmd[50];
+//	char ext_file[1000], int_file[1000], int_direct[1000];
+//	char directory[14];
+//	unsigned char dir_orfile[14];
+//    unsigned short dirInodeNo, file_inode_num, inode_num;
+//	char filename[14];
+//	int error;
 	
 
     if( argc == 2 ) {
@@ -983,7 +578,7 @@ int main(int argc, char *argv[])
         scanf(" %[^\n]s", input);
         cmd = strtok(input," ");
         
-		if(strcmp(cmd, "initfs") == 0) //v
+		if(strcmp(cmd, "initfs") == 0)
 		{
 			char *num1, *num2;
             filepath = strtok(NULL, " ");
@@ -1008,15 +603,15 @@ int main(int argc, char *argv[])
             parser = NULL;
 		}
         
-		else if(strcmp(cmd, "q") == 0) //v
+		else if(strcmp(cmd, "q") == 0)
 		{
-			lseek(fd, blockSize,SEEK_SET);
+			lseek(fd, blockSize, SEEK_SET);
 			write(fd, &super, sizeof(super));
             close(fd);
             return 0;
 		}
         
-		else if(strcmp(cmd, "cpin") == 0) //v
+		else if(strcmp(cmd, "cpin") == 0)
 		{
             char *targname;
             char *srcname;
@@ -1061,7 +656,7 @@ int main(int argc, char *argv[])
             parser = NULL;
         }
 
-		else if(strcmp(cmd,"mkdir") == 0) //v
+		else if(strcmp(cmd,"mkdir") == 0)
 		{
             if(fsActive)
             {
@@ -1091,7 +686,7 @@ int main(int argc, char *argv[])
             
         }
         
-        else if(strcmp(parser, "cd")==0)//v // Changes current directory
+        else if(strcmp(parser, "cd")==0)
         {
             if(fsActive)
             {
@@ -1099,10 +694,10 @@ int main(int argc, char *argv[])
                 dirName  = strtok(NULL, " ");
                 if(dirName)
                 {
-                    inode local;
-                    int inum = getInum(dirName);
-                    local = accessInode(inum);
-                    if(inum!= -1 && checkFlag(local.flags, DIR))
+                    inode temp;
+                    int inum = find_dirInode(dirName, inodeCurrent);
+                    temp = accessInode(inum);
+                    if(inum!= 0 && checkFlag(temp.flags, DIR))
                     {
                         inodeCurrent = inum;
                     }
@@ -1123,4 +718,314 @@ int main(int argc, char *argv[])
             printf("\nInvalid command\n ");
 		}
 	}
+}
+
+unsigned short  countFreeBlockNum () {
+    superBlock bufBlock;
+    lseek(fd, blockSize, SEEK_SET);
+    
+    read(fd, &bufBlock, sizeof(super));
+    
+    int freeBlockNum = 0;
+    freeBlockNum = bufBlock.nfree;
+    
+    if(super.free[0] != 0)
+        lseek(fd, blockSize * super.free[0], SEEK_SET);
+    else
+        return freeBlockNum;
+    
+    unsigned short nfree = 0, firstBlockNo = 1;
+    while(firstBlockNo != 0)
+    {
+        read(fd, &nfree, sizeof(nfree));
+        freeBlockNum += nfree;
+        
+        read(fd, &firstBlockNo, sizeof(nfree));
+        lseek(fd, firstBlockNo * blockSize, SEEK_SET);
+    }
+    
+    return num_of_free_blocks;
+} // unused
+
+void fillInodeList () {
+    lseek(fd, 2 * blockSize, SEEK_SET);
+    int counter = 0;
+    for(int i = 1; i < (blockSize / sizeof(inode)) * super.isize; i++) // retrieve 100 free inode by traveling through each inode
+    {
+        if(counter >= 100)
+        {
+            break;
+        }
+        read(fd, &local, sizeof(local));
+        if(!checkFlag(local.flags, ALLOC))
+        {
+            super.inodeList[counter] = i; // since root inode starts at 0
+            counter++;
+        }
+    }
+    super.ninode = counter;
+    return;
+}
+
+unsigned short allocInode () {
+    if (super.ninode > 0) {
+        super.ninode--;
+        return super.inodeList[super.nfree];
+    }
+    // List is empty, so...
+    fillInodeList();
+    if (super.ninode > 0)
+    {
+        return allocInode();
+    }
+    // No inodes left!
+    return -1;
+}
+
+void initFreelist () {
+    unsigned short nfree = 100;
+    unsigned short freelistBlockNo = 0;
+    unsigned short emptySignal = 0;
+    int dataBlockNum = totalBlockNum - inodeBlockNum - 2;
+    
+    unsigned short freelistBlockNum = (dataBlockNum - 1) / 100 ;
+    
+    freelistBlockNo = 2 + inodeBlockNum + 1; // first block is for root directory block
+    
+    freeDataBlockNo = 2 + inodeBlockNum + freelistBlockNum + 1; // In the data black array, there are two part. The first part is for block lists, and the second part is for empty blocks.
+    
+    // initialize freelist
+    super.free[0] = freelistBlockNo;
+    for(int i = 1; i < 100; i++)
+    {
+        super.free[i] = freeDataBlockNo++;
+    }
+    
+    // free data block list
+    lseek(fd, freelistBlockNo * blockSize, SEEK_SET);
+    int remainingBlockNum = (dataBlockNum - 1 - 100);// dataBlockNum - root block - blocks already in super.free
+    for(int i = 0; i < freelistBlockNum; i++)
+    {
+        if (remainingBlockNum / 100)
+            nfree = 100 - 1;
+        else
+            nfree = remainingBlockNum % 100;
+        
+        write(fd, &nfree, 2);
+        
+        if (i == freelistBlockNum - 1)
+        {
+            write(fd, &emptySignal, 2); //write 0 in the head of the last list
+        }
+        else
+        {
+            freelistBlockNo++;
+            write(fd, &freelistBlockNo, 2); // link the head of each list
+            remainingBlockNum--;
+        }
+        
+        for (int j = 0; j < nfree - 1; j++)
+        {
+            write(fd, &freeDataBlockNo, 2);
+            freeDataBlockNo++;
+            remainingBlockNum--;
+        }
+        
+        lseek(fd, freelistBlockNo * blockSize, SEEK_SET); // jump to next block
+    }
+}
+
+int fillFreelist () {
+    if(super.free[0] == 0)
+    {
+        printf("No more available data blocks \n");
+        return 0;
+    }
+    else
+    {
+        unsigned short nfree;
+        unsigned short freelistBlockNo = super.free[0];
+        lseek(fd, freelistBlockNo * blockSize, SEEK_SET);
+        read(fd, &nfree, 2);
+        
+        unsigned short buf;
+        for(int i = 0; i < nfree; i++)
+        {
+            read(fd, &buf, 2);
+            super.free[i] = buf;
+        }
+        
+        super.free[nfree] = free_list_block_num;
+        super.nfree = nfree + 1;
+        return 1;
+    }
+}
+
+unsigned short allocBlock () {
+    if(super.nfree == 1)
+    {
+        if(fillFreelist() != 1)
+        {
+            return 0;
+        }
+        else
+        {
+            super.nfree--;
+            return super.free[super.nfree];
+        }
+    }
+    else
+    {
+        super.nfree--;
+        return super.free[super.nfree];
+    }
+}
+
+unsigned int sizing (char size0, unsigned short size1, unsigned short flags) {
+    unsigned int size = 0;
+    unsigned int high = (size0 & 0xFF) << 16;
+    unsigned int low = (size1 & 0xFFFF);
+    unsigned int firstBit = (flags & 0x0200) << 15;
+    size = high + low +firstBit;
+    return size;
+}
+
+int checkFlag (unsigned short &flags, inodeFlag iflag) {
+    switch(iflag)
+    {
+        case ALLOC:
+            return  (flags & 0x8000) == 0x8000;
+            break;
+            
+        case PLAIN:
+            return  (flags & 0x6000) == 0x6000 && ((flags & 0x0200) != 0x0200);
+            break;
+            
+        case DIR:
+            return ((flags & 0x4000) == 0x4000) && ((flags & 0x2000) != 0x2000) && ((flags & 0x0200) != 0x0200);
+            break;
+            
+        case LARGE:
+            return  (flags & 0x1200) == 0x1200;
+            break;
+    }
+}
+
+void setFlag (unsigned short &flags, inodeFlag iflag) {
+    switch(iflag)
+    {
+        case ALLOC:
+            flags = flags | 0x8000;
+            break;
+            
+        case PLAIN:
+            flags = flags | 0x6000;
+            flags = flags & ~(0x0200);
+            break;
+            
+        case DIR:
+            flags = flags | 0x4000; // 4 or 6
+            flags = flags & ~(0x2000);// has to be 4
+            flags = flags & ~(0x0200);
+            break;
+            
+        case LARGE:
+            flags = flags | 0x1200;
+            break;
+    }
+}
+
+int find_dirInode(char *directory, int dirInodeNo) {
+    int i = 0, j = 0, k = 0, l = 0;
+    
+    unsigned short new_dirInodeNo, data_block_num, data_block, data_block_1;
+    char *dir_name;
+    inode dir_inode;
+    
+    lseek(fd, 2 * blockSize + dirInodeNo * 32, SEEK_SET);
+    read(fd, &dir_inode, sizeof(inode));
+    
+    if(!(checkFlag(dir_inode.flags,DIR)))
+    {
+        printf("It is not a directory. \n");
+        return 0;  //error
+    }
+    
+    for(i = 0; i < 8 ; i++)
+    {
+        if(dir_inode.addr[i] == 0)
+        {
+            return 0;
+        }
+        
+        data_block_num = dir_inode.addr[i];
+        lseek(fd, blockSize * data_block_num, SEEK_SET);
+        
+        if(i == 0)
+        {
+            lseek(fd, 32, SEEK_CUR);      //first 32 bytes are for itself and parent dir
+        }
+        for(j = 0; j < ((blockSize/16) - 2); j++)
+        {
+            read(fd, &new_dirInodeNo, 2);
+            if(new_dirInodeNo != 0)
+            {
+                read(fd, dir_name, 14);
+                if(strcmp(dir_name, directory) == 0)
+                {
+                    return new_dirInodeNo;
+                }
+            }
+            else
+            {
+                return 0;
+            }
+        }
+    }
+    return 0;
+}
+
+void initFS() {
+    //initialize global variable
+    dataBlockNum, inodeBlockNum, freelistBlockNum;
+    
+    // initialize super block
+    if(inodeNum % 16)
+        super.isize = (inodeNum / 16) + 1;
+    else
+        super.isize = (inodeNum / 16);
+    super.fsize = totalBlockNum;
+    initFreelist();
+    fillInodeList();
+    
+    lseek(fd, 1 * blockSize, SEEK_SET);
+    write(fd, &super, sizeof(super));
+    
+    // Set length of file
+    ftruncate(fd, super.fsize * blockSize);
+    
+    // writing zeroes to all inodes in ilist
+    char buffer[blockSize];
+    for (int i=0; i<blockSize; i++)
+        buffer[i] = 0;
+    lseek(fd, 2 * blockSize, SEEK_SET);
+    for (i=0; i < super.isize; i++)
+        write(fd,buffer,blockSize);
+    
+    //Initialize the root data block in DIR format
+    unsigned short inodeBlockNo = allocBlock();
+    lseek(fd, ((2 + inodeBlockNo) * blockSize), SEEK_SET);
+    addEntry(".", 0, 0);
+    addEntry("..", 0, 0);
+    
+    //create root directory inode
+    inode rootInode;
+    setFlag(rootInode.flags,ALLOC);
+    setFlag(rootInode.flags, DIR);
+    rootInode.size0 = 0x00;
+    rootInode.size1 = 0x0020;
+    rootInode.addr[0] = inodeBlockNo;
+    lseek(fd, blockSize*2, SEEK_SET);//the No. for rootInode is 0;
+    inodeCurrent = 0;
+    write(fd, &rootInode, sizeof(inode));
 }
