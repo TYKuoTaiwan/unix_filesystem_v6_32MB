@@ -13,17 +13,19 @@
 
 #include <stdio.h>
 #include <sys/types.h>
-#include <sys/stat.h>
 #include <fcntl.h>
-#include <stdint.h>
 #include <unistd.h>
-#include <stdlib.h>
+#include <errno.h>
+#include <math.h>
 #include <string.h>
+#include <stdlib.h>
+
 
 const unsigned short blockSize = 512;
 const unsigned int maxSize = 32*1024*1024;
 
-struct inode{
+
+typedef struct {
     unsigned short flags;
     char nlinks;
     char uid;
@@ -33,9 +35,8 @@ struct inode{
     unsigned short addr[8];
     unsigned short actime[2];
     unsigned short modtime[2];
-};
-
-struct superBlock{
+}inode;
+typedef struct{
     unsigned short isize;
     unsigned short fsize;
     unsigned short nfree;
@@ -46,7 +47,7 @@ struct superBlock{
     char ilock;
     char fmod;
     unsigned short time[2];
-};
+}superBlock;
 
 enum inodeFlag{
     ALLOC, //allocated
@@ -66,8 +67,8 @@ void initFreelist ();
 int fillFreelist ();
 unsigned short allocBlock ();
 unsigned int sizing (char size0, unsigned short size1, unsigned short flags);
-void setFlag (unsigned short &flags, inodeFlag iflag);
-int checkFlag (unsigned short &flags, inodeFlag iflag);
+void setFlag (unsigned short flags, enum inodeFlag iflag);
+int checkFlag (unsigned short flags, enum inodeFlag iflag);
 int find_dirInode(char *directory, int dirInodeNo);
 void addEntry (char *filename, unsigned short dirInodeNo, unsigned short file_inode_num);
 
@@ -75,10 +76,6 @@ void initFS ();
 void mkdirectory (char* filename, unsigned short inum);
 void createFile (char *src, char *dst);
 void copyＦileＥxt (char *srcname,char *targnam);
-
-
-
-
 
 int main(int argc, char *argv[])
 {
@@ -106,7 +103,7 @@ int main(int argc, char *argv[])
     
     char input[256];
     char *cmd;
-    bool fsActive = false;
+    int fsActive = 0;
     
 	while(1)
 	{
@@ -117,7 +114,6 @@ int main(int argc, char *argv[])
 		if(strcmp(cmd, "initfs") == 0)
 		{
 			char *num1, *num2;
-            filepath = strtok(NULL, " ");
             num1 = strtok(NULL, " ");
             num2 = strtok(NULL, " ");
             if (fsActive)
@@ -131,12 +127,12 @@ int main(int argc, char *argv[])
                     inodeNum = atoi(num2);
                     initFS();
                     printf("The file system is initialized\n");
-                    fsActive = true;
+                    fsActive = 1;
                 }
                 else
                     printf("Please check the parameters that you have entered.\n");
             }
-            parser = NULL;
+            cmd = NULL;
 		}
         
 		else if(strcmp(cmd, "q") == 0)
@@ -166,7 +162,7 @@ int main(int argc, char *argv[])
             else
                 printf("Please retry after initializing file system\n");
             
-            parser = NULL;
+            cmd = NULL;
 		}
 
 		else if(strcmp(cmd, "cpout") == 0)
@@ -189,7 +185,7 @@ int main(int argc, char *argv[])
             else
                 printf("Please retry after initializing file system\n");
             
-            parser = NULL;
+            cmd = NULL;
         }
 
 		else if(strcmp(cmd,"mkdir") == 0)
@@ -218,11 +214,11 @@ int main(int argc, char *argv[])
                 printf("Please retry after initializing file system\n");
                 
             }
-            parser = NULL;
+            cmd = NULL;
             
         }
         
-        else if(strcmp(parser, "cd")==0)
+        else if(strcmp(cmd, "cd")==0)
         {
             if(fsActive)
             {
@@ -232,14 +228,15 @@ int main(int argc, char *argv[])
                 {
                     inode temp;
                     int inum = find_dirInode(dirName, inodeCurrent);
-                    temp = accessInode(inum);
+                    lseek(fd, 2 * blockSize + inum * sizeof(inode), SEEK_SET);
+                    read(fd, &temp, sizeof(inode));
                     if(inum!= 0 && checkFlag(temp.flags, DIR))
                     {
                         inodeCurrent = inum;
                     }
                     else
                     {
-                        cout << "Invalid directory" << endl;
+                        printf("Invalid directory\n");
                     }
                 }
             }
@@ -256,35 +253,9 @@ int main(int argc, char *argv[])
 	}
 }
 
-unsigned short  countFreeBlockNum () {
-    superBlock bufBlock;
-    lseek(fd, blockSize, SEEK_SET);
-    
-    read(fd, &bufBlock, sizeof(super));
-    
-    int freeBlockNum = 0;
-    freeBlockNum = bufBlock.nfree;
-    
-    if(super.free[0] != 0)
-        lseek(fd, blockSize * super.free[0], SEEK_SET);
-    else
-        return freeBlockNum;
-    
-    unsigned short nfree = 0, firstBlockNo = 1;
-    while(firstBlockNo != 0)
-    {
-        read(fd, &nfree, sizeof(nfree));
-        freeBlockNum += nfree;
-        
-        read(fd, &firstBlockNo, sizeof(nfree));
-        lseek(fd, firstBlockNo * blockSize, SEEK_SET);
-    }
-    
-    return num_of_free_blocks;
-} // unused
-
 void fillInodeList () {
     lseek(fd, 2 * blockSize, SEEK_SET);
+    inode local;
     int counter = 0;
     for(int i = 1; i < (blockSize / sizeof(inode)) * super.isize; i++) // retrieve 100 free inode by traveling through each inode
     {
@@ -292,7 +263,7 @@ void fillInodeList () {
         {
             break;
         }
-        read(fd, &local, sizeof(local));
+        read(fd, &local, sizeof(inode));
         if(!checkFlag(local.flags, ALLOC))
         {
             super.inodeList[counter] = i; // since root inode starts at 0
@@ -320,25 +291,25 @@ unsigned short allocInode () {
 
 void initFreelist () {
     unsigned short nfree = 100;
-    unsigned short freelistBlockNo = 0;
+    unsigned short freelistBlockNoo = 0, freeDataBlockNo;
     unsigned short emptySignal = 0;
     int dataBlockNum = totalBlockNum - inodeBlockNum - 2;
     
     unsigned short freelistBlockNum = (dataBlockNum - 1) / 100 ;
     
-    freelistBlockNo = 2 + inodeBlockNum + 1; // first block is for root directory block
+    freelistBlockNoo = 2 + inodeBlockNum + 1; // first block is for root directory block
     
     freeDataBlockNo = 2 + inodeBlockNum + freelistBlockNum + 1; // In the data black array, there are two part. The first part is for block lists, and the second part is for empty blocks.
     
     // initialize freelist
-    super.free[0] = freelistBlockNo;
+    super.free[0] = freelistBlockNoo;
     for(int i = 1; i < 100; i++)
     {
-        super.free[i] = freeDataBlockNo++;
+        super.free[i] = freelistBlockNoo++;
     }
     
     // free data block list
-    lseek(fd, freelistBlockNo * blockSize, SEEK_SET);
+    lseek(fd, freelistBlockNoo * blockSize, SEEK_SET);
     int remainingBlockNum = (dataBlockNum - 1 - 100);// dataBlockNum - root block - blocks already in super.free
     for(int i = 0; i < freelistBlockNum; i++)
     {
@@ -355,8 +326,8 @@ void initFreelist () {
         }
         else
         {
-            freelistBlockNo++;
-            write(fd, &freelistBlockNo, 2); // link the head of each list
+            freelistBlockNoo++;
+            write(fd, &freelistBlockNoo, 2); // link the head of each list
             remainingBlockNum--;
         }
         
@@ -367,7 +338,7 @@ void initFreelist () {
             remainingBlockNum--;
         }
         
-        lseek(fd, freelistBlockNo * blockSize, SEEK_SET); // jump to next block
+        lseek(fd, freelistBlockNoo * blockSize, SEEK_SET); // jump to next block
     }
 }
 
@@ -391,7 +362,7 @@ int fillFreelist () {
             super.free[i] = buf;
         }
         
-        super.free[nfree] = free_list_block_num;
+        super.free[nfree] = freelistBlockNo;
         super.nfree = nfree + 1;
         return 1;
     }
@@ -426,7 +397,7 @@ unsigned int sizing (char size0, unsigned short size1, unsigned short flags) {
     return size;
 }
 
-int checkFlag (unsigned short &flags, inodeFlag iflag) {
+int checkFlag (unsigned short flags, enum inodeFlag iflag) {
     switch(iflag)
     {
         case ALLOC:
@@ -447,7 +418,7 @@ int checkFlag (unsigned short &flags, inodeFlag iflag) {
     }
 }
 
-void setFlag (unsigned short &flags, inodeFlag iflag) {
+void setFlag (unsigned short flags, enum inodeFlag iflag) {
     switch(iflag)
     {
         case ALLOC:
@@ -589,7 +560,7 @@ void addEntry (char *filename, unsigned short dirInodeNo, unsigned short file_in
         else//i=7 && j==31
         {
             printf("out of data blocks \n");
-            return 0;
+            return;
         }
     }
     
@@ -622,7 +593,7 @@ void initFS() {
     for (int i=0; i<blockSize; i++)
         buffer[i] = 0;
     lseek(fd, 2 * blockSize, SEEK_SET);
-    for (i=0; i < super.isize; i++)
+    for (int i=0; i < super.isize; i++)
         write(fd,buffer,blockSize);
     
     //Initialize the root data block in DIR format
@@ -655,10 +626,14 @@ void initFS() {
 }
 
 void mkdirectory (char* filename, unsigned short inum) {
-    inode local = accessInode(inum);
+    inode local;
+    lseek(fd, 2 * blockSize + inum * sizeof(inode), SEEK_SET);
+    read(fd, &local, sizeof(inode));
+
+
     setFlag(local.flags,ALLOC);
     setFlag(local.flags,DIR);
-    lseek(fd, 2 * block_size + (inum - 1) * sizeof(inode), SEEK_SET);
+    lseek(fd, 2 * blockSize + (inum - 1) * sizeof(inode), SEEK_SET);
     write(fd, &local, sizeof(local));
     
     // Add to current directory
@@ -699,7 +674,7 @@ void createFile (char *src, char *dst) {
     if (fp<0)
     {
         printf("The file can't be opened.\n");
-        return
+        return;
     }
     
     //check the input file size with 32MB
@@ -710,18 +685,11 @@ void createFile (char *src, char *dst) {
         printf("File transfer of more than 32 MB is not supported in MyV6 Filesystem \n");
         return;
     }
-    //check the duplicate file name
-    file_inode_num = find_dirInode(filename, inodeCurrent);
-    if(file_inode_num != 0)
-    {
-        printf("file already exists in the current directory \n");
-        return;
-    }
     
     // srcname is a path+filename or just filename
     unsigned int size = 0;
     char extData[512];
-    inode local;
+    inode file_inode;
     int direct_addressing = 1;
     int indirect_addressing = 0;
     int double_indirect_addr = 0;
@@ -734,7 +702,6 @@ void createFile (char *src, char *dst) {
     ssize_t readSize, write_size;
     unsigned short data_block, data_block_2, data_block_3, data_block_test, data_block_2_test;
     unsigned short zero_block = 0;
-    ssize_t read_size, write_size;
     int inode_num;
     
     
@@ -782,7 +749,7 @@ void createFile (char *src, char *dst) {
             if(blockNoTemp == 0)
             {
                 printf("out of data blocks \n");
-                return 0;
+                return;
             }
             
             
@@ -808,7 +775,7 @@ void createFile (char *src, char *dst) {
                     if(data_block == 0)
                     {
                         printf("Out of data blocks \n");
-                        return 0;
+                        return;
                     }
                     lseek(fd, data_block * blockSize, SEEK_SET);
                     i++;
@@ -852,13 +819,13 @@ void createFile (char *src, char *dst) {
                     if(k > 255)
                     {
                         printf("out of the space in the indirect address \n");
-                        return 0;
+                        return;
                     }
                     data_block_3 = get_free_data_block();
                     if(data_block_3 == 0)
                     {
                         printf("Out of data blocks \n");
-                        return 0;
+                        return;
                     }
                     lseek(fd, data_block_3 * blockSize, SEEK_SET);
                     write(fd, &zero_block, 2);
@@ -876,16 +843,16 @@ void createFile (char *src, char *dst) {
     }
     
     //setup and inode for the file
-    setFlag (local.flags, ALLOC);
-    local.size1 = size & 0x0000FFFF;
-    local.size0 = (size >> 16) & 0x00FF;
+    setFlag (file_inode.flags, ALLOC);
+    file_inode.size1 = size & 0x0000FFFF;
+    file_inode.size0 = (size >> 16) & 0x00FF;
     if(size > (16*1024*1024))
-        setFlag (local.flags, LARGE);
+        setFlag (file_inode.flags, LARGE);
     else
-        setFlag (local.flags, PLAIN);
+        setFlag (file_inode.flags, PLAIN);
     int inum = allocInode();    // inode number recieved is considering root node as 0
     lseek(fd, 2 * blockSize + inum * sizeof(inode), SEEK_SET);
-    write(fd, &local, sizeof(inode));
+    write(fd, &file_inode, sizeof(inode));
     
     // create an enrty in the directory for the file
     addEntry(dst, inodeCurrent, inum);
@@ -893,7 +860,7 @@ void createFile (char *src, char *dst) {
     return;
 }
 
-void copyＦileＥxt (char *srcname,char *targnam) {
+void copyＦileＥxt (char *srcname,char *targname) {
     int i = 0,j = 0, k = 0;
     unsigned short fileInode_num;
     inode fileInode;
