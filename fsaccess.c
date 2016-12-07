@@ -13,17 +13,16 @@
 
 #include <stdio.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <fcntl.h>
+#include <stdint.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <math.h>
-#include <string.h>
-#include <stdlib.h>
-
 
 const unsigned short blockSize = 512;
 const unsigned int maxSize = 32*1024*1024;
-
 
 typedef struct {
     unsigned short flags;
@@ -48,7 +47,6 @@ typedef struct{
     char fmod;
     unsigned short time[2];
 }superBlock;
-
 enum inodeFlag{
     ALLOC, //allocated
     PLAIN, //regular file
